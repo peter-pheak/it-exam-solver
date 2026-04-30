@@ -21,16 +21,28 @@
     <input type="password" id="ocrKey" placeholder="helloworld">
     <label>Gemini API Key (AI Studio):</label>
     <input type="password" id="geminiKey" placeholder="AIzaSy...">
-    <label>OpenRouter API Key (Optional):</label>
+<label>OpenRouter API Key (Optional):</label>
     <input type="password" id="openrouterKey" placeholder="sk-or-v1-...">
     <label>OpenRouter Model:</label>
     <input type="text" id="openrouterModel" placeholder="e.g. google/gemini-2.5-flash">
+    <label>Mistral API Key (Optional):</label>
+    <input type="password" id="mistralKey" placeholder="p-...">
+    <label>Mistral Model:</label>
+    <select id="mistralModel">
+      <option value="mistral-large-latest">Mistral Large (Best Quality)</option>
+      <option value="mistral-medium-latest">Mistral Medium (Balanced)</option>
+      <option value="mistral-small-latest">Mistral Small (Fast)</option>
+    </select>
     <p style="font-size: 11px; color: #666; margin-top: 8px; line-height: 1.4;">
       💡 <b>Pro Tip: Rotate Between Providers</b><br>
-      Use Google Gemini for daily tasks, Groq for speed, and Cloudflare for backup. This avoids hitting any single provider’s limit.
+      Use DeepSeek V4, Mistral, Google Gemini, and OpenRouter to avoid rate limits.
     </p>
     <button id="saveBtn">Save Keys</button>
     <span id="status"></span>
+  </div>
+  <div class="session-stats">
+    <span id="sessionTokens">Session: 0 tokens | Est: $0.00</span>
+    <button id="resetSessionBtn" style="padding: 2px 6px; font-size: 10px; background: #6b7280; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 10px;">Reset</button>
   </div>
   <hr>
   <button id="captureBtn">Select Region & Solve</button>

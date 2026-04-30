@@ -1,8 +1,44 @@
+const PRICING = {
+  'deepseek-v4-flash': { input: 0.27, output: 1.10 },
+  'deepseek-v4-pro': { input: 0.68, output: 2.80 },
+  'mistral-large-latest': { input: 2.00, output: 6.00 },
+  'mistral-medium-latest': { input: 0.60, output: 1.80 },
+  'mistral-small-latest': { input: 0.20, output: 0.60 },
+  'gemini-2.5-flash': { input: 0, output: 0 },
+  'gemini-2.0-flash': { input: 0, output: 0 },
+  'openrouter': { input: 0.50, output: 1.50 }
+};
+
+function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+function calculateCost(provider, inputTokens, outputTokens) {
+  const p = PRICING[provider];
+  if (!p) return 0;
+  return ((inputTokens / 1e6) * p.input + (outputTokens / 1e6) * p.output);
+}
+
+async function updateSessionTokens(usage, providerName) {
+  const session = await chrome.storage.local.get('sessionStats');
+  const current = session.sessionStats || { input: 0, output: 0, cost: 0 };
+  const cost = calculateCost(providerName, usage.input, usage.output);
+
+  await chrome.storage.local.set({
+    sessionStats: {
+      input: current.input + usage.input,
+      output: current.output + usage.output,
+      cost: parseFloat((current.cost + cost).toFixed(4))
+    }
+  });
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'captureRegion') {
     handleCapture(request.rect, request.domText, sender.tab.id);
   } else if (request.action === 'reRunQuery') {
-    reRunQuery(request.category, sender.tab.id);
+    reRunQuery(request.category, sender.tab.id, request.provider);
   }
 });
 
@@ -78,14 +114,14 @@ async function handleCapture(rect, domText, tabId) {
 
     const answer = await processQuestion(extractedText, category, croppedDataUrl);
 
-    // 7. Send result back to popup or inject into page
+    const usage = await chrome.storage.local.get('lastUsage');
+    
     chrome.runtime.sendMessage({ action: 'showResult', text: answer });
     
-    // Also alert in tab
     chrome.scripting.executeScript({
       target: { tabId: tabId },
-      func: (ans) => showResultModal(ans),
-      args: [answer]
+      func: (ans, usg) => showResultModal(ans, usg),
+      args: [answer, usage.lastUsage]
     });
 
   } catch (error) {
@@ -98,9 +134,10 @@ async function handleCapture(rect, domText, tabId) {
   }
 }
 
-async function processQuestion(text, category, imageUrl) {
+async function processQuestion(text, category, imageUrl, preferredProvider = 'auto') {
   if (category === 'vision') {
-    return await fallbackVisionModel(imageUrl, text);
+    const result = await fallbackVisionModel(imageUrl, text);
+    return typeof result === 'string' ? result : result.text;
   }
   if (category === 'ccna-web') {
     const cleanSearchQuery = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -112,85 +149,159 @@ async function processQuestion(text, category, imageUrl) {
       const answer = await extractAnswerWithDeepSeek(text, articleContent);
       if (answer && !answer.includes("Error")) return answer;
     }
-    // Fallback if web search fails
-    return await callTextAI("You are an expert Cisco/IT network engineer. Read the question and provide the exact correct multiple-choice answer, followed by a brief explanation.", text, false);
+    const result = await callTextAI("You are an expert Cisco/IT network engineer. Read the question and provide the exact correct multiple-choice answer, followed by a brief explanation.", text, false, preferredProvider);
+    return result.text;
   } else if (category === 'ccna-ai') {
-    return await callTextAI("You are an expert Cisco/IT network engineer. Read the question and provide the exact correct multiple-choice answer, followed by a brief explanation.", text, false);
+    const result = await callTextAI("You are an expert Cisco/IT network engineer. Read the question and provide the exact correct multiple-choice answer, followed by a brief explanation.", text, false, preferredProvider);
+    return result.text;
   } else if (category === 'code') {
-    return await callTextAI("You are a Senior Software Engineer. Analyze the code or question, explain the logic briefly, and provide the correct answer or code snippet.", text, false);
+    const result = await callTextAI("You are a Senior Software Engineer. Analyze the code or question, explain the logic briefly, and provide the correct answer or code snippet.", text, false, preferredProvider);
+    return result.text;
   } else if (category === 'math') {
-    return await callTextAI("You are a Math Professor. Solve this step-by-step, then output the final answer clearly at the bottom.", text, true); // Keep reasoning for math
+    const result = await callTextAI("You are a Math Professor. Solve this step-by-step, then output the final answer clearly at the bottom.", text, true, preferredProvider);
+    return result.text;
   } else {
-    return await callTextAI("You are a helpful expert assistant. Reason through this question and provide the most accurate answer.", text, false);
+    const result = await callTextAI("You are a helpful expert assistant. Reason through this question and provide the most accurate answer.", text, false, preferredProvider);
+    return result.text;
   }
 }
 
-async function callTextAI(systemPrompt, userText, isReasoning = false) {
-  const keys = await chrome.storage.local.get(['deepseekKey', 'geminiKey', 'openrouterKey', 'openrouterModel']);
+async function callTextAI(systemPrompt, userText, isReasoning = false, preferredProvider = 'auto') {
+  const keys = await chrome.storage.local.get(['deepseekKey', 'mistralKey', 'mistralModel', 'geminiKey', 'openrouterKey', 'openrouterModel']);
   
-  if (keys.deepseekKey) {
-    try {
-      const modelName = isReasoning ? 'deepseek-reasoner' : 'deepseek-chat';
-      const payload = {
-        model: modelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userText }
-        ],
-        max_tokens: isReasoning ? 1000 : 500 // Increased slightly for chat to ensure full answers
-      };
-      if (!isReasoning) payload.temperature = 0.1;
+  const getUsageFromResponse = (data, inputText, outputText) => {
+    const inputTokens = data.usage?.prompt_tokens || estimateTokens(inputText);
+    const outputTokens = data.usage?.completion_tokens || estimateTokens(outputText);
+    return { input: inputTokens, output: outputTokens };
+  };
 
-      const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keys.deepseekKey}` },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.choices && data.choices[0]) return "🤖 DeepSeek:\n" + data.choices[0].message.content;
-    } catch (e) { console.warn("DeepSeek text failed", e); }
-  }
-
-  if (keys.geminiKey) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keys.geminiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ parts: [{ text: userText }] }],
-          generationConfig: { temperature: 0.1 }
-        })
-      });
-      const data = await res.json();
-      if (data.candidates && data.candidates[0]) return "🤖 Gemini:\n" + data.candidates[0].content.parts[0].text;
-    } catch (e) { console.warn("Gemini text failed", e); }
-  }
-
-  if (keys.openrouterKey) {
-    try {
-      const model = keys.openrouterModel || 'google/gemini-2.5-flash';
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keys.openrouterKey}` },
-        body: JSON.stringify({
-          model: model,
+  if (preferredProvider === 'auto' || preferredProvider === 'deepseek') {
+    if (keys.deepseekKey) {
+      try {
+        const modelName = isReasoning ? 'deepseek-v4-pro' : 'deepseek-v4-flash';
+        const payload = {
+          model: modelName,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userText }
           ],
-          temperature: 0.1
-        })
-      });
-      const data = await res.json();
-      if (data.choices && data.choices[0]) return "🤖 OpenRouter:\n" + data.choices[0].message.content;
-    } catch (e) { console.warn("OpenRouter text failed", e); }
+          max_tokens: isReasoning ? 1000 : 500
+        };
+        if (!isReasoning) payload.temperature = 0.1;
+
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keys.deepseekKey}` },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.choices && data.choices[0]) {
+          const output = data.choices[0].message.content;
+          const usage = getUsageFromResponse(data, userText, output);
+          await updateSessionTokens(usage, modelName);
+          await chrome.storage.local.set({ 
+            lastUsage: { ...usage, provider: 'DeepSeek V4', cost: calculateCost(modelName, usage.input, usage.output) }
+          });
+          return { text: "🤖 DeepSeek V4:\n" + output, usage };
+        }
+      } catch (e) { console.warn("DeepSeek V4 failed", e); }
+    }
+    if (preferredProvider === 'deepseek') return { text: "Error: DeepSeek V4 failed. Check API key.", usage: null };
   }
 
-  return "Error: AI text generation failed. Please check your API keys.";
+  if (preferredProvider === 'auto' || preferredProvider === 'mistral') {
+    if (keys.mistralKey) {
+      try {
+        const model = keys.mistralModel || 'mistral-large-latest';
+        const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keys.mistralKey}` },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userText }
+            ],
+            temperature: 0.1
+          })
+        });
+        const data = await res.json();
+        if (data.choices && data.choices[0]) {
+          const output = data.choices[0].message.content;
+          const usage = getUsageFromResponse(data, userText, output);
+          await updateSessionTokens(usage, model);
+          await chrome.storage.local.set({ 
+            lastUsage: { ...usage, provider: 'Mistral', cost: calculateCost(model, usage.input, usage.output) }
+          });
+          return { text: "🤖 Mistral:\n" + output, usage };
+        }
+      } catch (e) { console.warn("Mistral failed", e); }
+    }
+    if (preferredProvider === 'mistral') return { text: "Error: Mistral failed. Check API key.", usage: null };
+  }
+
+  if (preferredProvider === 'auto' || preferredProvider === 'gemini') {
+    if (keys.geminiKey) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keys.geminiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ parts: [{ text: userText }] }],
+            generationConfig: { temperature: 0.1 }
+          })
+        });
+        const data = await res.json();
+        if (data.candidates && data.candidates[0]) {
+          const output = data.candidates[0].content.parts[0].text;
+          const usage = { input: estimateTokens(systemPrompt + userText), output: estimateTokens(output) };
+          await updateSessionTokens(usage, 'gemini-2.5-flash');
+          await chrome.storage.local.set({ 
+            lastUsage: { ...usage, provider: 'Gemini', cost: 0 }
+          });
+          return { text: "🤖 Gemini:\n" + output, usage };
+        }
+      } catch (e) { console.warn("Gemini failed", e); }
+    }
+    if (preferredProvider === 'gemini') return { text: "Error: Gemini failed. Check API key.", usage: null };
+  }
+
+  if (preferredProvider === 'auto' || preferredProvider === 'openrouter') {
+    if (keys.openrouterKey) {
+      try {
+        const model = keys.openrouterModel || 'google/gemini-2.5-flash';
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keys.openrouterKey}` },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userText }
+            ],
+            temperature: 0.1
+          })
+        });
+        const data = await res.json();
+        if (data.choices && data.choices[0]) {
+          const output = data.choices[0].message.content;
+          const usage = getUsageFromResponse(data, userText, output);
+          await updateSessionTokens(usage, 'openrouter');
+          await chrome.storage.local.set({ 
+            lastUsage: { ...usage, provider: 'OpenRouter', cost: calculateCost('openrouter', usage.input, usage.output) }
+          });
+          return { text: "🤖 OpenRouter:\n" + output, usage };
+        }
+      } catch (e) { console.warn("OpenRouter failed", e); }
+    }
+    if (preferredProvider === 'openrouter') return { text: "Error: OpenRouter failed. Check API key.", usage: null };
+  }
+
+  return { text: "Error: AI text generation failed. Please check your API keys.", usage: null };
 }
 
-async function reRunQuery(category, tabId) {
+async function reRunQuery(category, tabId, provider = 'auto') {
   chrome.scripting.executeScript({
     target: { tabId: tabId },
     func: () => { 
@@ -199,28 +310,36 @@ async function reRunQuery(category, tabId) {
     }
   });
   
-  const stored = await chrome.storage.local.get(['lastCapturedText', 'lastCapturedImage']);
+  const stored = await chrome.storage.local.get(['lastCapturedText', 'lastCapturedImage', 'lastUsage']);
   const textToProcess = stored.lastCapturedText;
   const imageToProcess = stored.lastCapturedImage;
+  const prevUsage = stored.lastUsage;
 
   let answer = "";
   if (!textToProcess || !textToProcess.trim()) {
      if (imageToProcess) {
-       answer = await fallbackVisionModel(imageToProcess);
+       const result = await fallbackVisionModel(imageToProcess);
+       answer = typeof result === 'string' ? result : result.text;
      } else {
        answer = "Error: No text was extracted initially. Pure AI modes require text. Please try capturing again.";
      }
   } else {
-     answer = await processQuestion(textToProcess, category, imageToProcess);
+     answer = await processQuestion(textToProcess, category, imageToProcess, provider);
   }
 
+  const newUsage = await chrome.storage.local.get('lastUsage');
+  
   chrome.scripting.executeScript({
     target: { tabId: tabId },
-    func: (ans) => { 
+    func: (ans, usage) => { 
       const el = document.getElementById('it-exam-result-text');
-      if(el) el.innerHTML = window.parseMarkdown(ans); 
+      if(el) el.innerHTML = window.parseMarkdown(ans);
+      const tokenEl = document.getElementById('it-exam-token-display');
+      if (tokenEl && usage) {
+        tokenEl.textContent = `In: ${usage.input} | Out: ${usage.output} | Est: $${usage.cost.toFixed(2)}`;
+      }
     },
-    args: [answer]
+    args: [answer, newUsage.lastUsage]
   });
 }
 
@@ -389,7 +508,7 @@ async function extractAnswerWithDeepSeek(question, rawArticleHtml) {
       'Authorization': `Bearer ${keys.deepseekKey}`
     },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-flash',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
       max_tokens: 150
@@ -398,7 +517,7 @@ async function extractAnswerWithDeepSeek(question, rawArticleHtml) {
 
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  return "🤖 DeepSeek Answer:\n" + data.choices[0].message.content;
+  return "🤖 DeepSeek V4 Answer:\n" + data.choices[0].message.content;
 }
 
 async function fallbackVisionModel(imageDataUrl, text = '') {

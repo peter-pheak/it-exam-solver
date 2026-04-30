@@ -244,7 +244,7 @@ window.showToast = function(message) {
   }, 3000);
 };
 
-window.showResultModal = function(answer) {
+window.showResultModal = function(answer, usage = null) {
   const existing = document.getElementById('it-exam-result-panel');
   if (existing) document.body.removeChild(existing);
 
@@ -258,16 +258,31 @@ window.showResultModal = function(answer) {
     flexDirection: 'column', overflow: 'hidden'
   });
   
+  const tokenDisplay = usage 
+    ? `In: ${usage.input} | Out: ${usage.output} | Est: $${usage.cost.toFixed(2)}`
+    : 'In: -- | Out: -- | Est: --';
+  
   panel.innerHTML = `
-    <div style="background: #2563eb; color: #fff; padding: 10px 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-      <select id="it-exam-category-select" style="background: #1d4ed8; color: white; border: 1px solid #60a5fa; border-radius: 4px; padding: 4px; font-size: 12px; outline: none; flex-grow: 1;">
-        <option value="ccna-web">CCNA / IT (Web Search)</option>
-        <option value="ccna-ai">CCNA / IT (Pure AI)</option>
-        <option value="vision">Image/Exhibit (Vision AI)</option>
-        <option value="code">Programming (Pure AI)</option>
-        <option value="math">Math (Pure AI)</option>
-        <option value="general">General (Pure AI)</option>
+    <div style="background: #2563eb; color: #fff; padding: 10px 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+      <select id="it-exam-category-select" style="background: #1d4ed8; color: white; border: 1px solid #60a5fa; border-radius: 4px; padding: 4px; font-size: 11px; outline: none; min-width: 120px;">
+        <option value="ccna-web">CCNA (Web)</option>
+        <option value="ccna-ai">CCNA (AI)</option>
+        <option value="vision">Vision AI</option>
+        <option value="code">Code</option>
+        <option value="math">Math</option>
+        <option value="general">General</option>
       </select>
+      <select id="it-exam-provider-select" style="background: #1d4ed8; color: white; border: 1px solid #60a5fa; border-radius: 4px; padding: 4px; font-size: 11px; outline: none; min-width: 90px;">
+        <option value="auto">Auto</option>
+        <option value="deepseek">DeepSeek V4</option>
+        <option value="mistral">Mistral</option>
+        <option value="gemini">Gemini</option>
+        <option value="openrouter">OpenRouter</option>
+      </select>
+      <span id="it-exam-token-display" style="font-size: 10px; background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 4px; white-space: nowrap;">
+        ${tokenDisplay}
+      </span>
+      <button id="it-exam-copy-btn" style="padding: 4px 8px; font-size: 10px; background: #10b981; border: none; border-radius: 3px; cursor: pointer; color: white; font-weight: bold;">Copy</button>
       <span id="it-exam-close-panel" style="cursor: pointer; font-size: 18px; line-height: 1; padding: 0 5px;">&times;</span>
     </div>
     <div id="it-exam-result-text" style="padding: 15px; font-size: 14px; max-height: 500px; overflow-y: auto; line-height: 1.5;">
@@ -277,18 +292,34 @@ window.showResultModal = function(answer) {
   
   document.body.appendChild(panel);
   
-  // Set current category in dropdown
-  chrome.storage.local.get(['defaultCategory'], (res) => {
+  chrome.storage.local.get(['defaultCategory', 'preferredProvider'], (res) => {
     if (res.defaultCategory) {
       document.getElementById('it-exam-category-select').value = res.defaultCategory;
     }
+    if (res.preferredProvider) {
+      document.getElementById('it-exam-provider-select').value = res.preferredProvider;
+    }
   });
 
-  // Listen for category change to re-run query
   document.getElementById('it-exam-category-select').addEventListener('change', (e) => {
     const newCat = e.target.value;
     chrome.storage.local.set({ defaultCategory: newCat });
-    chrome.runtime.sendMessage({ action: 'reRunQuery', category: newCat });
+    const provider = document.getElementById('it-exam-provider-select').value;
+    chrome.runtime.sendMessage({ action: 'reRunQuery', category: newCat, provider: provider });
+  });
+
+  document.getElementById('it-exam-provider-select').addEventListener('change', (e) => {
+    const newProvider = e.target.value;
+    chrome.storage.local.set({ preferredProvider: newProvider });
+    const category = document.getElementById('it-exam-category-select').value;
+    chrome.runtime.sendMessage({ action: 'reRunQuery', category: category, provider: newProvider });
+  });
+
+  document.getElementById('it-exam-copy-btn').addEventListener('click', () => {
+    const text = document.getElementById('it-exam-result-text').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      window.showToast("Copied to clipboard!");
+    });
   });
 
   document.getElementById('it-exam-close-panel').addEventListener('click', () => {
