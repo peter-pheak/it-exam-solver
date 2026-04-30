@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h3>IT Exam Solver</h3>
+  <div class="settings">
+    <label>Default Mode:</label>
+    <select id="defaultCategory">
+      <option value="ccna-web">CCNA / IT (Web Search)</option>
+      <option value="ccna-ai">CCNA / IT (Pure AI)</option>
+      <option value="vision">Vision AI (For Images/Exhibits)</option>
+      <option value="code">Programming (Pure AI)</option>
+      <option value="math">Math (Pure AI)</option>
+      <option value="general">General (Pure AI)</option>
+    </select>
+    <label>DeepSeek API Key:</label>
+    <input type="password" id="deepseekKey" placeholder="sk-...">
+    <label>OCR.space API Key (Optional, fixes rate limits):</label>
+    <input type="password" id="ocrKey" placeholder="helloworld">
+    <label>Gemini API Key (AI Studio):</label>
+    <input type="password" id="geminiKey" placeholder="AIzaSy...">
+    <label>OpenRouter API Key (Optional):</label>
+    <input type="password" id="openrouterKey" placeholder="sk-or-v1-...">
+    <label>OpenRouter Model:</label>
+    <input type="text" id="openrouterModel" placeholder="e.g. google/gemini-2.5-flash">
+    <p style="font-size: 11px; color: #666; margin-top: 8px; line-height: 1.4;">
+      💡 <b>Pro Tip: Rotate Between Providers</b><br>
+      Use Google Gemini for daily tasks, Groq for speed, and Cloudflare for backup. This avoids hitting any single provider’s limit.
+    </p>
+    <button id="saveBtn">Save Keys</button>
+    <span id="status"></span>
+  </div>
+  <hr>
+  <button id="captureBtn">Select Region & Solve</button>
+  <div id="resultArea" style="display:none;">
+    <h4>Result:</h4>
+    <div id="resultText"></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

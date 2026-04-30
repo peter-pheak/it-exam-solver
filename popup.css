@@ -1,0 +1,79 @@
+body {
+  width: 300px;
+  font-family: system-ui, -apple-system, sans-serif;
+  padding: 15px;
+  margin: 0;
+  color: #333;
+}
+h3 {
+  margin-top: 0;
+  color: #2563eb;
+}
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #4b5563;
+}
+input {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+}
+select {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+}
+button {
+  width: 100%;
+  padding: 10px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+button:hover {
+  background: #1d4ed8;
+}
+#saveBtn {
+  background: #10b981;
+  margin-bottom: 5px;
+}
+#saveBtn:hover {
+  background: #059669;
+}
+#status {
+  font-size: 12px;
+  color: #10b981;
+  display: inline-block;
+  margin-bottom: 10px;
+}
+hr {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  margin: 15px 0;
+}
+#resultArea {
+  margin-top: 15px;
+  padding: 12px;
+  background: #f3f4f6;
+  border-radius: 6px;
+  word-wrap: break-word;
+  font-size: 14px;
+}
+#resultArea h4 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}

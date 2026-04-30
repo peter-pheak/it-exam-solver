@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "IT Exam Solver",
+  "version": "1.0",
+  "description": "Captures a region, extracts text, searches itexamanswers.net, and uses DeepSeek to find the answer.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "start-capture": {
+      "suggested_key": {
+        "default": "Alt+Q",
+        "mac": "Alt+Q"
+      },
+      "description": "Start region capture"
+    }
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
